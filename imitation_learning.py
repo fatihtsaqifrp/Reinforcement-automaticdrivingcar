@@ -299,7 +299,9 @@ def train_model(epochs: int = 50):
             
             self.fc = nn.Sequential(
                 nn.Flatten(),
-                nn.Linear(64 * 7 * 7, 256),   # Flatten → 256 neurons
+                # Use LazyLinear so input resolution (H,W) can vary without shape mismatch.
+                # CarRacing-v3 observations are typically 96x96 → conv output is 64x8x8 (4096).
+                nn.LazyLinear(256),            # Flatten → 256 neurons
                 nn.ReLU(),
                 nn.Dropout(0.3),                # Dropout untuk mencegah overfitting
                 nn.Linear(256, 3),              # Output: [steering, gas, brake]
@@ -315,6 +317,11 @@ def train_model(epochs: int = 50):
     # Training Loop
     # ----------------------------------------------------------
     model = DrivingNet().to(device)
+
+    # Initialize lazy layers (e.g., LazyLinear) before creating the optimizer / counting params
+    with torch.no_grad():
+        _ = model(torch.zeros(1, *X.shape[1:], device=device))
+
     criterion = nn.MSELoss()        # Mean Squared Error
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
@@ -406,7 +413,7 @@ def play_ai():
             )
             self.fc = nn.Sequential(
                 nn.Flatten(),
-                nn.Linear(64 * 7 * 7, 256),
+                nn.LazyLinear(256),
                 nn.ReLU(),
                 nn.Dropout(0.3),
                 nn.Linear(256, 3),
@@ -421,7 +428,13 @@ def play_ai():
     # Load model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = DrivingNet().to(device)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=True))
+    try:
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=True))
+    except RuntimeError as e:
+        print("\n❌ Gagal load model (kemungkinan arsitektur/ukuran input berubah).")
+        print("   Solusi: latih ulang model: python imitation_learning.py --train")
+        print(f"   Detail: {e}")
+        return
     model.eval()
     print(f"\n📂 Model loaded dari: {MODEL_PATH}")
     
